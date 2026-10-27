@@ -94,9 +94,7 @@ func main() {
 	case "status":
 		err = runStatus()
 	case "traps":
-		for _, t := range traps {
-			fmt.Printf("%-24s %s\n", t.Name, t.Description)
-		}
+		fmt.Print(trapList())
 	case "help", "-h", "--help":
 		fmt.Print(usage, agentGuide)
 	default:
@@ -151,13 +149,7 @@ func runServe() error {
 }
 
 func runGoal(args []string) error {
-	goal := strings.Join(args, " ")
-	var sess Session
-	if err := call("POST", "/api/sessions", map[string]string{"goal": goal}, &sess); err != nil {
-		return err
-	}
-	fmt.Printf("session %d started: %s\n", sess.ID, sess.Goal)
-	return nil
+	return printResult(startGoal(strings.Join(args, " ")))
 }
 
 func runStep(args []string) error {
@@ -181,13 +173,7 @@ func runStep(args []string) error {
 		args = fs.Args()[1:]
 	}
 
-	step := Step{Direction: *dir, Distance: *dist, Ghost: *ghost, Summary: strings.Join(words, " ")}
-	var sess Session
-	if err := call("POST", "/api/sessions/current/steps", step, &sess); err != nil {
-		return err
-	}
-	fmt.Printf("step %d recorded: %s\n", len(sess.Steps), step.Direction)
-	return nil
+	return printResult(recordStep(Step{Direction: *dir, Distance: *dist, Ghost: *ghost, Summary: strings.Join(words, " ")}))
 }
 
 func runDone(args []string) error {
@@ -197,23 +183,58 @@ func runDone(args []string) error {
 		return err
 	}
 
-	var sess Session
-	if err := call("POST", "/api/sessions/current/finish", map[string]bool{"reached": !*abandon}, &sess); err != nil {
-		return err
-	}
-	if sess.Reached {
-		fmt.Printf("session %d: goal reached in %d steps\n", sess.ID, len(sess.Steps))
-	} else {
-		fmt.Printf("session %d: abandoned after %d steps\n", sess.ID, len(sess.Steps))
-	}
-	return nil
+	return printResult(finish(!*abandon))
 }
 
 func runStatus() error {
-	var sess Session
-	if err := call("GET", "/api/sessions/current", nil, &sess); err != nil {
+	return printResult(status())
+}
+
+func printResult(out string, err error) error {
+	if err != nil {
 		return err
 	}
+	fmt.Print(out)
+	return nil
+}
+
+// The functions below do the actual work behind each command and return the
+// text to show for it. Both the CLI and the MCP server use them, so the two
+// always behave (and read) the same.
+
+func startGoal(goal string) (string, error) {
+	var sess Session
+	if err := call("POST", "/api/sessions", map[string]string{"goal": goal}, &sess); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("session %d started: %s\n", sess.ID, sess.Goal), nil
+}
+
+func recordStep(step Step) (string, error) {
+	var sess Session
+	if err := call("POST", "/api/sessions/current/steps", step, &sess); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("step %d recorded: %s\n", len(sess.Steps), step.Direction), nil
+}
+
+func finish(reached bool) (string, error) {
+	var sess Session
+	if err := call("POST", "/api/sessions/current/finish", map[string]bool{"reached": reached}, &sess); err != nil {
+		return "", err
+	}
+	if sess.Reached {
+		return fmt.Sprintf("session %d: goal reached in %d steps\n", sess.ID, len(sess.Steps)), nil
+	}
+	return fmt.Sprintf("session %d: abandoned after %d steps\n", sess.ID, len(sess.Steps)), nil
+}
+
+func status() (string, error) {
+	var sess Session
+	if err := call("GET", "/api/sessions/current", nil, &sess); err != nil {
+		return "", err
+	}
+	var b strings.Builder
 
 	state := "in progress"
 	if sess.EndedAt != nil {
@@ -222,16 +243,24 @@ func runStatus() error {
 			state = "reached"
 		}
 	}
-	fmt.Printf("session %d (%s)\nproject: %s\ngoal: %s\n", sess.ID, state, sess.Project, sess.Goal)
+	fmt.Fprintf(&b, "session %d (%s)\nproject: %s\ngoal: %s\n", sess.ID, state, sess.Project, sess.Goal)
 
 	for i, st := range sess.Steps {
-		line := fmt.Sprintf("%3d  %-8s %d  %s", i+1, st.Direction, st.Distance, st.Summary)
+		fmt.Fprintf(&b, "%3d  %-8s %d  %s", i+1, st.Direction, st.Distance, st.Summary)
 		if st.Ghost != "" {
-			line += "  [ghost: " + st.Ghost + "]"
+			fmt.Fprintf(&b, "  [ghost: %s]", st.Ghost)
 		}
-		fmt.Println(line)
+		b.WriteString("\n")
 	}
-	return nil
+	return b.String(), nil
+}
+
+func trapList() string {
+	var b strings.Builder
+	for _, t := range traps {
+		fmt.Fprintf(&b, "%-24s %s\n", t.Name, t.Description)
+	}
+	return b.String()
 }
 
 // call sends a JSON request about the current project to the running server

@@ -36,7 +36,9 @@ Each `thinkpath serve` registers itself in `~/.thinkpath/servers` (override with
 
 ### As an MCP server
 
-`thinkpath mcp` runs a local MCP server over stdio that exposes `goal`, `step`, `done`, `status` and `traps` as tools; it still needs `thinkpath serve` running. To add it to Claude Code:
+`thinkpath mcp` runs a local MCP server over stdio that exposes `goal`, `step`, `done`, `status` and `traps` as tools; it still needs `thinkpath serve` running.
+
+To add it to Claude:
 
 ```sh
 claude mcp add thinkpath -- thinkpath mcp

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>thinkpath</title>
+<style>
+  :root {
+    --bg: #121418; --panel: #1a1d23; --line: #2a2e36; --ink: #e8e8ea; --muted: #8b909a;
+    --toward: #4fbf85; --stalled: #e3aa3c; --sideways: #e4675a; --goal: #6aa8ff; --trap: #a27be6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: grid; grid-template-columns: 1fr 360px;
+    background: var(--bg); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, sans-serif;
+  }
+  main { display: flex; flex-direction: column; min-width: 0; }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: center; }
+  header .goal { flex: 1; min-width: 0; }
+  header .goal small { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+  header .goal div { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stats { display: flex; gap: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stats b { color: var(--ink); }
+  select { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  #board { flex: 1; min-height: 0; }
+  svg { width: 100%; height: 100%; display: block; }
+  aside { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; }
+  aside h2 { margin: 0; padding: 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .step { padding: 10px 16px; border-top: 1px solid var(--line); }
+  .step .meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .tag { padding: 1px 7px; border-radius: 999px; font-weight: 600; font-size: 11px; color: #121418; }
+  .tag.toward { background: var(--toward); } .tag.stalled { background: var(--stalled); } .tag.sideways { background: var(--sideways); }
+  .tag.ghost { background: none; color: var(--trap); border: 1px dashed var(--trap); }
+  .empty { padding: 40px; color: var(--muted); text-align: center; }
+  code { background: var(--panel); padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="goal"><small id="state">No session</small><div id="goal">—</div></div>
+    <div class="stats" id="stats"></div>
+    <select id="project" title="Project"></select>
+    <select id="picker" title="Session"></select>
+  </header>
+  <div id="board"></div>
+</main>
+<aside>
+  <h2>Steps</h2>
+  <div id="steps"></div>
+</aside>
+
+<script>
+// The board is a fixed 1000x700 coordinate space. The piece starts at the
+// bottom, the goal sits at the top, and the traps line the edges, so drifting
+// sideways visibly carries the piece away from the straight line to the goal.
+const W = 1000, H = 700, UNIT = 30;
+const START = { x: 500, y: 640 };
+const GOAL = { x: 500, y: 70 };
+
+// These names must match the traps list in store.go.
+const TRAPS = {
+  'scope-creep':            { x: 170, y: 70,  label: 'Scope creep' },
+  'rabbit-hole':            { x: 80,  y: 260, label: 'Rabbit hole' },
+  'research-spiral':        { x: 80,  y: 470, label: 'Research spiral' },
+  'bikeshedding':           { x: 230, y: 650, label: 'Bikeshedding' },
+  'yak-shaving':            { x: 920, y: 260, label: 'Yak shaving' },
+  'tool-tinkering':         { x: 920, y: 470, label: 'Tool tinkering' },
+  'premature-optimization': { x: 770, y: 650, label: 'Premature optimization' },
+};
+const COLORS = { toward: 'var(--toward)', stalled: 'var(--stalled)', sideways: 'var(--sideways)' };
+
+let sessions = [];
+let selectedProject = null;  // null means "follow the most recently active project"
+let selectedId = null;       // null means "follow the project's latest session"
+let lastJSON = '';
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+const clamp = p => ({ x: Math.min(W - 20, Math.max(20, p.x)), y: Math.min(H - 20, Math.max(20, p.y)) });
+
+const projectName = p => p ? p.split('/').filter(Boolean).pop() : '(no project)';
+
+function lastActivity(s) {
+  const times = [s.startedAt, s.endedAt, s.steps[s.steps.length - 1]?.at].filter(Boolean);
+  return Math.max(...times.map(t => new Date(t).getTime()));
+}
+
+// Projects, most recently active first.
+function projects() {
+  const latest = new Map();
+  for (const s of sessions) latest.set(s.project, Math.max(latest.get(s.project) ?? 0, lastActivity(s)));
+  return [...latest.entries()].sort((a, b) => b[1] - a[1]).map(([p]) => p);
+}
+
+function moveToward(p, target, d) {
+  const len = dist(p, target);
+  if (len <= d) return { ...target };
+  return { x: p.x + (target.x - p.x) / len * d, y: p.y + (target.y - p.y) / len * d };
+}
+
+// layout replays the steps to work out where the piece was after each one.
+//   toward   -> straight at the goal
+//   sideways -> at the named trap if there's a ghost, otherwise perpendicular
+//               to the goal, continuing on whichever side it already drifted to
+//   stalled  -> stays put (drawn as a ring that grows with repeated stalls)
+function layout(session) {
+  let pos = { ...START };
+  let stalls = 0;
+  const points = [];
+
+  for (const step of session.steps) {
+    const d = step.distance * UNIT;
+    if (step.direction === 'toward') {
+      pos = moveToward(pos, GOAL, d);
+      stalls = 0;
+    } else if (step.direction === 'sideways') {
+      if (step.ghost && TRAPS[step.ghost]) {
+        pos = moveToward(pos, TRAPS[step.ghost], d);
+      } else {
+        const dx = GOAL.x - pos.x, dy = GOAL.y - pos.y, len = Math.hypot(dx, dy) || 1;
+        const side = pos.x < START.x ? -1 : 1;
+        pos = clamp({ x: pos.x + side * (-dy / len) * d, y: pos.y + side * (dx / len) * d });
+      }
+      stalls = 0;
+    } else {
+      stalls++;
+    }
+    points.push({ ...pos, step, stalls });
+  }
+  return points;
+}
+
+function render() {
+  const project = selectedProject ?? projects()[0];
+  const inProject = sessions.filter(s => s.project === project);
+  const session = inProject.find(s => s.id === selectedId) ?? inProject[inProject.length - 1];
+  renderPickers(project, inProject, session);
+
+  if (!session) {
+    document.getElementById('board').innerHTML =
+      '<div class="empty">No session yet. Run <code>thinkpath goal "..."</code> to start one.</div>';
+    document.getElementById('steps').innerHTML = '';
+    return;
+  }
+
+  const points = layout(session);
+  const here = points.length ? points[points.length - 1] : START;
+  const end = session.reached ? GOAL : here;
+
+  const state = session.endedAt ? (session.reached ? 'Goal reached' : 'Abandoned') : 'In progress';
+  document.getElementById('state').textContent = `${projectName(session.project)} · session ${session.id} · ${state}`;
+  document.getElementById('goal').textContent = session.goal;
+  document.getElementById('goal').title = session.goal;
+
+  const counts = { toward: 0, stalled: 0, sideways: 0 };
+  session.steps.forEach(s => counts[s.direction]++);
+  const progress = Math.round(100 * (1 - dist(end, GOAL) / dist(START, GOAL)));
+  document.getElementById('stats').innerHTML =
+    `<span><b>${progress}%</b> there</span>` +
+    `<span style="color:var(--toward)">▲ ${counts.toward}</span>` +
+    `<span style="color:var(--stalled)">● ${counts.stalled}</span>` +
+    `<span style="color:var(--sideways)">◀▶ ${counts.sideways}</span>`;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+        <path d="M50 0H0V50" fill="none" stroke="#1d2027" stroke-width="1"/>
+      </pattern>
+      <filter id="glow"><feGaussianBlur stdDeviation="6"/></filter>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#grid)"/>
+    <line x1="${START.x}" y1="${START.y}" x2="${GOAL.x}" y2="${GOAL.y}" stroke="#2f343d" stroke-width="2" stroke-dasharray="2 8"/>`;
+
+  // Only the newest step's ghost is drawn at full strength: it's the warning
+  // that matters right now. Older ghosts stay as faint history.
+  const latest = points[points.length - 1];
+  const activeTrap = !session.endedAt && latest?.step.ghost;
+
+  for (const [name, t] of Object.entries(TRAPS)) {
+    const active = name === activeTrap;
+    svg += `<g opacity="${active ? 1 : 0.45}">
+      ${active ? `<circle cx="${t.x}" cy="${t.y}" r="34" fill="var(--trap)" opacity=".35" filter="url(#glow)"/>` : ''}
+      <circle cx="${t.x}" cy="${t.y}" r="22" fill="none" stroke="var(--trap)" stroke-width="2" stroke-dasharray="4 4"/>
+      <text x="${t.x}" y="${t.y + 40}" fill="var(--trap)" font-size="13" text-anchor="middle">${t.label}</text>
+    </g>`;
+  }
+
+  svg += `<circle cx="${GOAL.x}" cy="${GOAL.y}" r="${session.reached ? 30 : 24}" fill="var(--goal)" opacity="${session.reached ? 0.9 : 0.25}"/>
+    <circle cx="${GOAL.x}" cy="${GOAL.y}" r="24" fill="none" stroke="var(--goal)" stroke-width="2"/>
+    <text x="${GOAL.x}" y="${GOAL.y + 5}" fill="var(--ink)" font-size="13" font-weight="600" text-anchor="middle">GOAL</text>
+    <circle cx="${START.x}" cy="${START.y}" r="6" fill="#3a3f49"/>
+    <text x="${START.x}" y="${START.y + 24}" fill="var(--muted)" font-size="12" text-anchor="middle">start</text>`;
+
+  points.forEach((p, i) => {
+    if (!p.step.ghost || p === latest) return;
+    const t = TRAPS[p.step.ghost];
+    svg += `<line x1="${p.x}" y1="${p.y}" x2="${t.x}" y2="${t.y}" stroke="var(--trap)" stroke-width="1.5" stroke-dasharray="3 6" opacity=".18"/>`;
+  });
+  if (latest?.step.ghost) {
+    const t = TRAPS[latest.step.ghost];
+    svg += `<line x1="${latest.x}" y1="${latest.y}" x2="${t.x}" y2="${t.y}" stroke="var(--trap)" stroke-width="3" stroke-dasharray="8 8" opacity="${activeTrap ? 0.9 : 0.3}">
+      ${activeTrap ? '<animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.2s" repeatCount="indefinite"/>' : ''}
+    </line>`;
+  }
+
+  let prev = START;
+  points.forEach((p, i) => {
+    const color = COLORS[p.step.direction];
+    if (p.step.direction === 'stalled') {
+      svg += `<circle cx="${p.x}" cy="${p.y}" r="${10 + p.stalls * 5}" fill="none" stroke="${color}" stroke-width="2" opacity=".7"/>`;
+    } else {
+      svg += `<line x1="${prev.x}" y1="${prev.y}" x2="${p.x}" y2="${p.y}" stroke="${color}" stroke-width="4" stroke-linecap="round"/>`;
+    }
+    prev = p;
+  });
+  if (session.reached && points.length) {
+    svg += `<line x1="${here.x}" y1="${here.y}" x2="${GOAL.x}" y2="${GOAL.y}" stroke="var(--toward)" stroke-width="2" stroke-dasharray="4 6"/>`;
+  }
+
+  points.forEach((p, i) => {
+    if (p.step.direction === 'stalled') return;
+    svg += `<g><title>#${i + 1} ${esc(p.step.direction)}: ${esc(p.step.summary)}</title>
+      <circle cx="${p.x}" cy="${p.y}" r="9" fill="var(--bg)" stroke="${COLORS[p.step.direction]}" stroke-width="2"/>
+      <text x="${p.x}" y="${p.y + 4}" fill="var(--ink)" font-size="10" text-anchor="middle">${i + 1}</text></g>`;
+  });
+
+  svg += `<circle cx="${end.x}" cy="${end.y}" r="14" fill="var(--ink)" stroke="var(--bg)" stroke-width="4"/></svg>`;
+  document.getElementById('board').innerHTML = svg;
+
+  document.getElementById('steps').innerHTML = session.steps.map((s, i) => `
+    <div class="step">
+      <div class="meta">
+        <span>#${i + 1}</span>
+        <span class="tag ${s.direction}">${s.direction}${s.distance ? ' +' + s.distance : ''}</span>
+        ${s.ghost ? `<span class="tag ghost">→ ${esc(TRAPS[s.ghost]?.label ?? s.ghost)}</span>` : ''}
+        <span style="margin-left:auto">${new Date(s.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+      </div>
+      <div>${esc(s.summary)}</div>
+    </div>`).reverse().join('') || '<div class="empty">No steps yet.</div>';
+}
+
+function renderPickers(project, inProject, current) {
+  document.getElementById('project').innerHTML = projects().map(p =>
+    `<option value="${esc(p)}" title="${esc(p)}" ${p === project ? 'selected' : ''}>${esc(projectName(p))}</option>`).join('');
+  document.getElementById('picker').innerHTML = inProject.slice().reverse().map(s =>
+    `<option value="${s.id}" ${s === current ? 'selected' : ''}>#${s.id} ${esc(s.goal.slice(0, 40))}</option>`).join('');
+}
+
+// Picking the newest choice in either list goes back to following along
+// automatically, so the board keeps up as new sessions and projects appear.
+document.getElementById('project').addEventListener('change', e => {
+  selectedProject = e.target.value === projects()[0] ? null : e.target.value;
+  selectedId = null;
+  render();
+});
+
+document.getElementById('picker').addEventListener('change', e => {
+  const id = Number(e.target.value);
+  const project = selectedProject ?? projects()[0];
+  const inProject = sessions.filter(s => s.project === project);
+  selectedId = id === inProject[inProject.length - 1]?.id ? null : id;
+  render();
+});
+
+// Poll the API and only redraw when something has actually changed.
+async function refresh() {
+  try {
+    const res = await fetch('/api/sessions');
+    const text = await res.text();
+    if (text !== lastJSON) {
+      lastJSON = text;
+      sessions = JSON.parse(text);
+      render();
+    }
+  } catch (err) {
+    document.getElementById('state').textContent = 'Server unreachable';
+  }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

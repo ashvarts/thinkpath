@@ -16,14 +16,18 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const usage = `thinkpath: see whether you're heading toward your goal.
 
 Usage:
   thinkpath serve                       start the server and board (http://127.0.0.1:7878)
+  thinkpath server list                 list the running thinkpath servers
   thinkpath goal "<goal>"               start a new session with this goal
   thinkpath step -dir <direction> [-dist 1-5] [-ghost <trap>] "<summary>"
                                         record one step in the current session
@@ -87,6 +91,8 @@ func main() {
 	switch cmd {
 	case "serve":
 		err = runServe()
+	case "server":
+		err = runServerCmd(args)
 	case "goal":
 		err = runGoal(args)
 	case "step":
@@ -148,8 +154,31 @@ func runServe() error {
 		return err
 	}
 
+	unregister, err := registerServer(ServerInfo{PID: os.Getpid(), Addr: addr(), Data: path, StartedAt: time.Now()})
+	if err != nil {
+		return err
+	}
+	defer unregister()
+
+	// Remove our registry entry on Ctrl-C or kill, since ListenAndServe
+	// never returns on its own.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		unregister()
+		os.Exit(0)
+	}()
+
 	log.Printf("thinkpath: board at http://%s (data in %s)", addr(), path)
 	return http.ListenAndServe(addr(), newServer(store))
+}
+
+func runServerCmd(args []string) error {
+	if len(args) == 1 && args[0] == "list" {
+		return runServerList()
+	}
+	return errors.New("usage: thinkpath server list")
 }
 
 func runGoal(args []string) error {

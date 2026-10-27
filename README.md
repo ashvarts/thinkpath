@@ -51,6 +51,6 @@ pi mcp add thinkpath --description "thinkpath board: record the session goal and
 pi mcp list   # should show: thinkpath: connected, 5 tools
 ```
 
-Then tell Pi:
+Then tell Agent:
 
 > We're going to use thinkpath: follow the thinkpath MCP server's instructions. The goal is ...

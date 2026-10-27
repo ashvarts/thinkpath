@@ -23,7 +23,7 @@ thinkpath serve
 ### List running servers
 
 ```sh
-thinkpath server list
+thinkpath servers list
 ```
 
 Each `thinkpath serve` registers itself in `~/.thinkpath/servers` (override with `THINKPATH_SERVERS`) and removes the entry when it exits. The command prints the PID, address, start time and data file of every server still running, and drops entries left behind by servers that were killed.

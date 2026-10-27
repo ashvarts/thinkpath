@@ -14,7 +14,7 @@ import (
 )
 
 // ServerInfo describes one running `thinkpath serve` process. Each server
-// writes one of these files on startup so that `thinkpath server list` can
+// writes one of these files on startup so that `thinkpath servers list` can
 // find it without having to scan ports.
 type ServerInfo struct {
 	PID       int       `json:"pid"`

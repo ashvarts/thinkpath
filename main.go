@@ -27,7 +27,7 @@ const usage = `thinkpath: see whether you're heading toward your goal.
 
 Usage:
   thinkpath serve                       start the server and board (http://127.0.0.1:7878)
-  thinkpath server list                 list the running thinkpath servers
+  thinkpath servers list                list the running thinkpath servers
   thinkpath goal "<goal>"               start a new session with this goal
   thinkpath step -dir <direction> [-dist 1-5] [-ghost <trap>] "<summary>"
                                         record one step in the current session
@@ -91,8 +91,8 @@ func main() {
 	switch cmd {
 	case "serve":
 		err = runServe()
-	case "server":
-		err = runServerCmd(args)
+	case "servers":
+		err = runServersCmd(args)
 	case "goal":
 		err = runGoal(args)
 	case "step":
@@ -174,11 +174,11 @@ func runServe() error {
 	return http.ListenAndServe(addr(), newServer(store))
 }
 
-func runServerCmd(args []string) error {
+func runServersCmd(args []string) error {
 	if len(args) == 1 && args[0] == "list" {
 		return runServerList()
 	}
-	return errors.New("usage: thinkpath server list")
+	return errors.New("usage: thinkpath servers list")
 }
 
 func runGoal(args []string) error {

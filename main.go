@@ -30,6 +30,8 @@ Usage:
   thinkpath done [-abandon]             end the current session (reached, or abandoned)
   thinkpath status                      show the current goal and its steps
   thinkpath traps                       list the trap names usable with -ghost
+  thinkpath mcp                         run as an MCP server over stdin/stdout,
+                                        exposing the commands above as tools
   thinkpath help                        show this, plus instructions for agents
 
 Directions: toward, stalled, sideways
@@ -95,6 +97,8 @@ func main() {
 		err = runStatus()
 	case "traps":
 		fmt.Print(trapList())
+	case "mcp":
+		err = runMCP(os.Stdin, os.Stdout)
 	case "help", "-h", "--help":
 		fmt.Print(usage, agentGuide)
 	default:

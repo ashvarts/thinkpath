@@ -23,3 +23,11 @@ thinkpath serve
 Tell your agent:
 
 > We're going to use thinkpath: run `thinkpath help` and follow the agent instructions. The goal is ...
+
+### As an MCP server
+
+`thinkpath mcp` runs a local MCP server over stdio that exposes `goal`, `step`, `done`, `status` and `traps` as tools; it still needs `thinkpath serve` running. To add it to Claude Code:
+
+```sh
+claude mcp add thinkpath -- thinkpath mcp
+```

@@ -50,6 +50,3 @@ pi mcp list   # should show: thinkpath: connected, 5 tools
 Then tell Pi:
 
 > We're going to use thinkpath: follow the thinkpath MCP server's instructions. The goal is ...
-
-To try it in Pi step by step, and clean up afterwards, follow [docs/pi-runbook.md](docs/pi-runbook.md).
-To try Pi with the CLI instead of MCP, follow [docs/pi-cli-runbook.md](docs/pi-cli-runbook.md).

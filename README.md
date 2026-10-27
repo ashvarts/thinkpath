@@ -20,17 +20,19 @@ Run the server, then open http://127.0.0.1:7878:
 thinkpath serve
 ```
 
-### List running servers
+### As a CLI
+
+Tell your agent:
+
+> We're going to use thinkpath: run `thinkpath help` and follow the agent instructions. The goal is ...
+
+To list the running servers:
 
 ```sh
 thinkpath servers list
 ```
 
 Each `thinkpath serve` registers itself in `~/.thinkpath/servers` (override with `THINKPATH_SERVERS`) and removes the entry when it exits. The command prints the PID, address, start time and data file of every server still running, and drops entries left behind by servers that were killed.
-
-Tell your agent:
-
-> We're going to use thinkpath: run `thinkpath help` and follow the agent instructions. The goal is ...
 
 ### As an MCP server
 

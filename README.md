@@ -31,3 +31,14 @@ Tell your agent:
 ```sh
 claude mcp add thinkpath -- thinkpath mcp
 ```
+
+To add it to [Pi](https://github.com/earendil-works/pi):
+
+```sh
+pi mcp add thinkpath --description "thinkpath board: record the session goal and each step toward it" -- thinkpath mcp
+pi mcp list   # should show: thinkpath: connected, 5 tools
+```
+
+Then tell Pi:
+
+> We're going to use thinkpath: follow the thinkpath MCP server's instructions. The goal is ...

@@ -1,41 +1,25 @@
 # thinkpath
 
-A board that shows whether a work session is heading toward its goal, standing still, or drifting sideways into a known trap like yak shaving or a rabbit hole.
+## Description
 
-One binary does both jobs: `thinkpath serve` runs a local server with a JSON API and the board page, and the other commands are a CLI that agents (or you) use to record goals and steps.
+thinkpath is a CLI and a local web board that plot each prompt in an agent session as a move toward your goal, a stall, or a drift sideways into a known trap like yak shaving or a rabbit hole.
 
-## Run it
+It solves the problem of losing a session to curiosity and side quests by showing the drift as it happens, so the session ends with something others can see or use: a doc, a blog post, a PR, a feature, or a tool.
+
+## Usage
+
+Install:
 
 ```sh
-go install .            # or: go build -o thinkpath .
-thinkpath serve         # board at http://127.0.0.1:7878
+go install github.com/ashvarts/thinkpath@latest
 ```
+
+Run the server, then open http://127.0.0.1:7878:
 
 ```sh
-thinkpath goal "ship the login page"
-thinkpath step -dir toward -dist 3 "wrote the form handler"
-thinkpath step -dir sideways -dist 2 -ghost tool-tinkering "reworked my shell prompt"
-thinkpath step -dir stalled "re-read the OAuth docs"
-thinkpath done              # or: thinkpath done -abandon
-thinkpath status
-thinkpath traps
+thinkpath serve
 ```
 
-## Using it with an agent
-
-`thinkpath help` prints the rules an agent needs to follow, so a one-line prompt is enough to start a tracked session:
+Tell your agent:
 
 > We're going to use thinkpath: run `thinkpath help` and follow the agent instructions. The goal is ...
-
-## API
-
-| Method | Path | Body |
-|---|---|---|
-| GET | `/api/sessions` | |
-| GET | `/api/sessions/current` | |
-| POST | `/api/sessions` | `{"goal": "..."}` |
-| POST | `/api/sessions/current/steps` | `{"direction": "toward", "distance": 3, "summary": "...", "ghost": "yak-shaving"}` |
-| POST | `/api/sessions/current/finish` | `{"reached": true}` |
-| GET | `/api/traps` | |
-
-Data lives in `~/.thinkpath/data.json` (override with `THINKPATH_DATA`); the address can be changed with `THINKPATH_ADDR`.

@@ -52,21 +52,26 @@
 
 <script>
 // The board is a fixed 1000x700 coordinate space. The piece starts at the
-// bottom, the goal sits at the top, and the traps line the edges, so drifting
+// top, the goal sits at the bottom, and the traps line the edges, so drifting
 // sideways visibly carries the piece away from the straight line to the goal.
 const W = 1000, H = 700, UNIT = 30;
-const START = { x: 500, y: 640 };
-const GOAL = { x: 500, y: 70 };
+const START = { x: 500, y: 60 };
+const GOAL = { x: 500, y: 630 };
+
+// We can't know how many steps a goal will take, so each unit of a toward
+// step closes this share of the distance still left. The piece creeps ever
+// closer to the goal but only lands on it when the session is marked done.
+const TOWARD_SHARE = 0.1;
 
 // These names must match the traps list in store.go.
 const TRAPS = {
-  'scope-creep':            { x: 170, y: 70,  label: 'Scope creep' },
-  'rabbit-hole':            { x: 80,  y: 260, label: 'Rabbit hole' },
-  'research-spiral':        { x: 80,  y: 470, label: 'Research spiral' },
-  'bikeshedding':           { x: 230, y: 650, label: 'Bikeshedding' },
-  'yak-shaving':            { x: 920, y: 260, label: 'Yak shaving' },
-  'tool-tinkering':         { x: 920, y: 470, label: 'Tool tinkering' },
-  'premature-optimization': { x: 770, y: 650, label: 'Premature optimization' },
+  'scope-creep':            { x: 170, y: 630, label: 'Scope creep' },
+  'rabbit-hole':            { x: 80,  y: 440, label: 'Rabbit hole' },
+  'research-spiral':        { x: 80,  y: 230, label: 'Research spiral' },
+  'bikeshedding':           { x: 230, y: 50,  label: 'Bikeshedding' },
+  'yak-shaving':            { x: 920, y: 440, label: 'Yak shaving' },
+  'tool-tinkering':         { x: 920, y: 230, label: 'Tool tinkering' },
+  'premature-optimization': { x: 770, y: 50,  label: 'Premature optimization' },
 };
 const COLORS = { toward: 'var(--toward)', stalled: 'var(--stalled)', sideways: 'var(--sideways)' };
 
@@ -100,7 +105,7 @@ function moveToward(p, target, d) {
 }
 
 // layout replays the steps to work out where the piece was after each one.
-//   toward   -> straight at the goal
+//   toward   -> straight at the goal, by a share of the distance left
 //   sideways -> at the named trap if there's a ghost, otherwise perpendicular
 //               to the goal, continuing on whichever side it already drifted to
 //   stalled  -> stays put (drawn as a ring that grows with repeated stalls)
@@ -112,7 +117,8 @@ function layout(session) {
   for (const step of session.steps) {
     const d = step.distance * UNIT;
     if (step.direction === 'toward') {
-      pos = moveToward(pos, GOAL, d);
+      const left = dist(pos, GOAL);
+      pos = moveToward(pos, GOAL, left * (1 - (1 - TOWARD_SHARE) ** step.distance));
       stalls = 0;
     } else if (step.direction === 'sideways') {
       if (step.ghost && TRAPS[step.ghost]) {
@@ -120,7 +126,7 @@ function layout(session) {
       } else {
         const dx = GOAL.x - pos.x, dy = GOAL.y - pos.y, len = Math.hypot(dx, dy) || 1;
         const side = pos.x < START.x ? -1 : 1;
-        pos = clamp({ x: pos.x + side * (-dy / len) * d, y: pos.y + side * (dx / len) * d });
+        pos = clamp({ x: pos.x + side * (dy / len) * d, y: pos.y + side * (-dx / len) * d });
       }
       stalls = 0;
     } else {
@@ -228,7 +234,11 @@ function render() {
   svg += `<circle cx="${end.x}" cy="${end.y}" r="14" fill="var(--ink)" stroke="var(--bg)" stroke-width="4"/></svg>`;
   document.getElementById('board').innerHTML = svg;
 
-  document.getElementById('steps').innerHTML = session.steps.map((s, i) => `
+  // Steps run oldest to newest down the list, like the piece down the board,
+  // so keep the newest one in view.
+  const aside = document.querySelector('aside');
+  const steps = document.getElementById('steps');
+  steps.innerHTML = session.steps.map((s, i) => `
     <div class="step">
       <div class="meta">
         <span>#${i + 1}</span>
@@ -237,7 +247,8 @@ function render() {
         <span style="margin-left:auto">${new Date(s.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
       </div>
       <div>${esc(s.summary)}</div>
-    </div>`).reverse().join('') || '<div class="empty">No steps yet.</div>';
+    </div>`).join('') || '<div class="empty">No steps yet.</div>';
+  aside.scrollTop = aside.scrollHeight;
 }
 
 function renderPickers(project, inProject, current) {
